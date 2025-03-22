@@ -1,3 +1,8 @@
 requests
 beautifulsoup4
 flask
+import pandas as pd
+
+data = [{"titre": "Appartement à vendre", "prix": "200 000 TND"}]
+df = pd.DataFrame(data)
+df.to_csv("annonces.csv", index=False)
