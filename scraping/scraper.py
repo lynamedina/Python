@@ -1,52 +1,71 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-import csv
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
+import pandas as pd
+import time
 
-# Chemin vers ton WebDriver (télécharge-le si nécessaire : https://chromedriver.chromium.org/downloads)
-CHROMEDRIVER_PATH = "chromedriver.exe"
-
-# Options pour éviter les fenêtres qui s'ouvrent
+# Configuration du navigateur
 options = Options()
-options.add_argument("--headless")  # Mode sans interface graphique
+options.add_argument("--start-maximized")
+options.add_argument("--disable-blink-features=AutomationControlled")  # Pour éviter la détection
+# options.add_argument("--headless")
 
-# Lancer le navigateur
-service = Service(CHROMEDRIVER_PATH)
-driver = webdriver.Chrome(service=service, options=options)
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
-# Ouvrir la page
-url = "https://www.tunisie-annonce.com/AnnoncesImmobilier.asp"
+# Accéder à la page
+url = "http://www.tunisie-annonce.com/AnnoncesImmobilier.asp"
 driver.get(url)
 
-# Attendre le chargement des annonces
-driver.implicitly_wait(5)
+# Attendre que la page se charge complètement
+time.sleep(5)  # Augmentez ce délai si nécessaire
 
-# Récupérer les annonces
-annonces = driver.find_elements(By.CLASS_NAME, "small")
+# Récupérer le HTML
+soup = BeautifulSoup(driver.page_source, 'html.parser')
 
-# Liste pour stocker les annonces extraites
-annonces_data = []
-
-for annonce in annonces:
-    try:
-        titre = annonce.find_element(By.CLASS_NAME, "annonceur").text.strip()
-        prix = annonce.find_element(By.CLASS_NAME, "prix").text.strip()
-        # Extraire le lien si disponible
-        lien = annonce.find_element(By.TAG_NAME, "a").get_attribute("href") if annonce.find_element(By.TAG_NAME, "a") else "N/A"
-        
-        # Ajouter les données extraites dans la liste
-        annonces_data.append([titre, prix, lien])
-        
-        print(f"Titre: {titre} | Prix: {prix} | Lien: {lien}")
-    except Exception as e:
-        print(f"Erreur lors de l'extraction de l'annonce: {e}")
-
-# Fermer Selenium
+# Fermer le navigateur
 driver.quit()
 
-# Sauvegarder les annonces dans un fichier CSV
-with open("annonces.csv", "w", newline="", encoding="utf-8") as f:
-    writer = csv.writer(f)
-    writer.writerow(["Titre", "Prix", "Lien"])  # Écrire les en-têtes
-    writer.writerows(annonces_data)  # Écrire les données des annonces
+# Trouver le tableau principal
+table = soup.find('table', {'width': '100%', 'cellspacing': '0', 'cellpadding': '0'})
+
+annonces = []
+
+if table:
+    # Trouver toutes les lignes d'annonces (ignore la première ligne d'en-tête)
+    for row in table.find_all('tr')[1:]:
+        cols = row.find_all('td')
+        
+        # Vérifier que nous avons assez de colonnes
+        if len(cols) >= 12:
+            annonce = {
+                'Région': cols[1].get_text(strip=True),
+                'Nature': cols[3].get_text(strip=True),
+                'Type': cols[5].get_text(strip=True),
+                'Texte annonce': cols[7].get_text(strip=True),
+                'Prix': cols[9].get_text(strip=True).replace(' ', ''),
+                'Modifiée': cols[11].get_text(strip=True)
+            }
+            annonces.append(annonce)
+
+# Sauvegarder en CSV
+if annonces:
+    df = pd.DataFrame(annonces)
+    
+    # Nettoyage supplémentaire
+    df['Prix'] = df['Prix'].str.extract(r'(\d+)')[0]  # Extraire uniquement les chiffres
+    
+    # Sauvegarde
+    df.to_csv('annonces_immobilieres.csv', index=False, encoding='utf-8-sig')
+    print(f"✅ {len(annonces)} annonces sauvegardées dans annonces_immobilieres.csv")
+else:
+    print("⚠️ Aucune annonce trouvée. Raisons possibles :")
+    print("- Le site a changé sa structure HTML")
+    print("- Le chargement prend plus de temps (augmentez le time.sleep)")
+    print("- Le site bloque les robots (essayez avec --headless désactivé)")
+    
+    # Sauvegarde du HTML pour analyse
+    with open("debug_page.html", "w", encoding="utf-8") as f:
+        f.write(soup.prettify())
+    print("HTML sauvegardé dans debug_page.html pour inspection")
